@@ -1,9 +1,118 @@
+# Development Dependencies
+/node_modules/
+/vendor/
+/bower_components/
+
+# Build Artifacts
+/build/
+/dist/
+/assets/dist/
+*.min.js
+*.min.css
+*.map
+
+# Environment & Configuration
+.env
+.env.*
+!.env.example
+wp-config.php
+wp-config-*.php
+auth.json
+*.config.local.json
+
+# Testing
+/tests/coverage/
+/phpunit.xml
+/phpunit.*.xml
+/.phpunit.result.cache
+/coverage/
+/.coverage
+/clover.xml
+
+# Package Managers
+composer.phar
+/yarn-error.log
+npm-debug.log
+package-lock.json
+yarn.lock
+
+# IDE & Editor Files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+.settings/
+.project
+.buildpath
+*.swp
+*.swo
+*~
+
+# Operating System
 .DS_Store
-phpcs.xml
-phpunit.xml
 Thumbs.db
+desktop.ini
+._*
+.Spotlight-V100
+.Trashes
+
+# WordPress Specific
+*.log
+/languages/*.mo
+/languages/*.po~
 wp-cli.local.yml
-node_modules/
+
+# Plugin Specific
+/cache/
+/screenshots/
+/logs/
+*.cache
+*.bak
 *.sql
 *.tar.gz
 *.zip
+
+# API & Security
+api-keys.php
+auth-tokens.php
+*.pem
+*.key
+*.crt
+
+# Temporary Files
+*.tmp
+*.temp
+.sass-cache/
+.tmp/
+*.swp
+*.swo
+
+# Documentation (keep README.md)
+/docs/
+!/README.md
+
+# Development Tools
+.eslintcache
+.stylelintcache
+.php_cs.cache
+.php-cs-fixer.cache
+phpcs.xml
+phpcs.xml.dist
+.phpcs.xml
+.phpcs.xml.dist
+.phplint.cache
+
+# Deployment
+.deployignore
+.distignore
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+bitbucket-pipelines.yml
+
+# Misc
+TODO
+NOTES.md
+*.log
+.htaccess
