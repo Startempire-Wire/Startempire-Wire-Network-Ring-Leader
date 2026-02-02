@@ -126,6 +126,27 @@ class RestController {
             'permission_callback' => [$this, 'check_authenticated'],
         ]);
 
+        // Full profile: user + pairing + drift + scoreboard + preferences
+        register_rest_route(self::NAMESPACE, '/member/profile', [
+            'methods'  => 'GET',
+            'callback' => [$this, 'get_full_profile'],
+            'permission_callback' => [$this, 'check_authenticated'],
+        ]);
+
+        // Update profile preferences from any surface
+        register_rest_route(self::NAMESPACE, '/member/profile', [
+            'methods'  => 'POST',
+            'callback' => [$this, 'update_profile'],
+            'permission_callback' => [$this, 'check_authenticated'],
+        ]);
+
+        // Member's connected integrations
+        register_rest_route(self::NAMESPACE, '/member/integrations', [
+            'methods'  => 'GET',
+            'callback' => [$this, 'get_integrations'],
+            'permission_callback' => [$this, 'check_authenticated'],
+        ]);
+
         // === CACHE ===
 
         register_rest_route(self::NAMESPACE, '/cache/flush', [
@@ -369,6 +390,169 @@ class RestController {
         ]);
     }
 
+    /**
+     * Full profile: aggregates user data + scoreboard score + pairing + drift.
+     * Single endpoint for any surface to get the complete member picture.
+     */
+    public function get_full_profile(\WP_REST_Request $request): \WP_REST_Response {
+        $user = $request->get_attributes()['sewn_user'] ?? null;
+        if (!$user) {
+            return new \WP_REST_Response(['error' => 'Not authenticated'], 401);
+        }
+
+        $user_id = (int) $user['user_id'];
+        $profile = [
+            'user'          => $user,
+            'preferences'   => $this->get_user_preferences($user_id),
+            'scoreboard'    => null,
+            'pairing'       => null,
+            'drift'         => null,
+            'integrations'  => [],
+        ];
+
+        // Fetch scoreboard data if provisioned
+        $scoreboard_id = get_user_meta($user_id, 'sewn_scoreboard_id', true);
+        if (!empty($scoreboard_id)) {
+            $sb_url = $this->config->scoreboard_internal_url() . '/' . $scoreboard_id;
+            $token  = $this->config->scoreboard_token();
+
+            // Score
+            $score_resp = wp_remote_get($sb_url . '/v1/score', [
+                'headers' => ['Authorization' => 'Bearer ' . $token],
+                'timeout' => 5,
+            ]);
+            if (!is_wp_error($score_resp) && wp_remote_retrieve_response_code($score_resp) === 200) {
+                $profile['scoreboard'] = json_decode(wp_remote_retrieve_body($score_resp), true);
+            }
+
+            // Pairing profile
+            $pair_resp = wp_remote_get($sb_url . '/v1/pairing/profile/effective', [
+                'headers' => ['Authorization' => 'Bearer ' . $token],
+                'timeout' => 5,
+            ]);
+            if (!is_wp_error($pair_resp) && wp_remote_retrieve_response_code($pair_resp) === 200) {
+                $profile['pairing'] = json_decode(wp_remote_retrieve_body($pair_resp), true);
+            }
+
+            // Drift
+            $drift_resp = wp_remote_get($sb_url . '/v1/pairing/neural-drift', [
+                'headers' => ['Authorization' => 'Bearer ' . $token],
+                'timeout' => 5,
+            ]);
+            if (!is_wp_error($drift_resp) && wp_remote_retrieve_response_code($drift_resp) === 200) {
+                $profile['drift'] = json_decode(wp_remote_retrieve_body($drift_resp), true);
+            }
+
+            // Connected integrations
+            $int_resp = wp_remote_get($sb_url . '/v1/integrations', [
+                'headers' => ['Authorization' => 'Bearer ' . $token],
+                'timeout' => 5,
+            ]);
+            if (!is_wp_error($int_resp) && wp_remote_retrieve_response_code($int_resp) === 200) {
+                $profile['integrations'] = json_decode(wp_remote_retrieve_body($int_resp), true);
+            }
+
+            $profile['scoreboard_url'] = $this->config->scoreboard_url() . '/' . $scoreboard_id;
+        }
+
+        return new \WP_REST_Response($profile);
+    }
+
+    /**
+     * Update member preferences from any surface.
+     * Preferences are stored as user meta on the Ring Leader site.
+     */
+    public function update_profile(\WP_REST_Request $request): \WP_REST_Response {
+        $user = $request->get_attributes()['sewn_user'] ?? null;
+        if (!$user) {
+            return new \WP_REST_Response(['error' => 'Not authenticated'], 401);
+        }
+
+        $user_id = (int) $user['user_id'];
+        $body = $request->get_json_params();
+
+        // Whitelist of allowed preference fields
+        $allowed = [
+            'notification_email',    // bool
+            'notification_discord',  // bool
+            'notification_push',     // bool
+            'theme',                 // 'dark'|'light'|'auto'
+            'timezone',              // e.g., 'America/Los_Angeles'
+            'display_name_override', // string
+            'bio',                   // string
+            'avatar_url',            // URL
+            'onboarding_completed',  // bool
+        ];
+
+        $prefs = $this->get_user_preferences($user_id);
+        $updated = [];
+
+        foreach ($allowed as $key) {
+            if (array_key_exists($key, $body)) {
+                $prefs[$key] = sanitize_text_field($body[$key]);
+                $updated[] = $key;
+            }
+        }
+
+        update_user_meta($user_id, 'sewn_preferences', $prefs);
+
+        return new \WP_REST_Response([
+            'ok'       => true,
+            'updated'  => $updated,
+            'preferences' => $prefs,
+        ]);
+    }
+
+    /**
+     * Get member's connected integrations from scoreboard.
+     */
+    public function get_integrations(\WP_REST_Request $request): \WP_REST_Response {
+        $user = $request->get_attributes()['sewn_user'] ?? null;
+        if (!$user) {
+            return new \WP_REST_Response(['error' => 'Not authenticated'], 401);
+        }
+
+        $user_id = (int) $user['user_id'];
+        $scoreboard_id = get_user_meta($user_id, 'sewn_scoreboard_id', true);
+        if (empty($scoreboard_id)) {
+            return new \WP_REST_Response(['integrations' => [], 'provisioned' => false]);
+        }
+
+        $sb_url = $this->config->scoreboard_internal_url() . '/' . $scoreboard_id;
+        $token  = $this->config->scoreboard_token();
+
+        $resp = wp_remote_get($sb_url . '/v1/integrations', [
+            'headers' => ['Authorization' => 'Bearer ' . $token],
+            'timeout' => 5,
+        ]);
+
+        if (is_wp_error($resp) || wp_remote_retrieve_response_code($resp) !== 200) {
+            return new \WP_REST_Response(['integrations' => [], 'error' => 'Scoreboard unreachable']);
+        }
+
+        return new \WP_REST_Response(json_decode(wp_remote_retrieve_body($resp), true));
+    }
+
+    // ==================== HELPERS (PROFILE) ====================
+
+    /**
+     * Get user preferences stored as user meta.
+     */
+    private function get_user_preferences(int $user_id): array {
+        $prefs = get_user_meta($user_id, 'sewn_preferences', true);
+        if (!is_array($prefs)) {
+            $prefs = [
+                'notification_email'   => true,
+                'notification_discord' => false,
+                'notification_push'    => false,
+                'theme'                => 'dark',
+                'timezone'             => 'America/Los_Angeles',
+                'onboarding_completed' => false,
+            ];
+        }
+        return $prefs;
+    }
+
     // ==================== CACHE ====================
 
     public function flush_cache(\WP_REST_Request $request): \WP_REST_Response {
@@ -409,9 +593,7 @@ class RestController {
      * Resolve the requesting user's tier from token, or default to 'free'.
      */
     private function resolve_tier(\WP_REST_Request $request): string {
-        $tier = $request->get_param('tier');
-        if ($tier) return sanitize_text_field($tier);
-
+        // NEVER trust client-provided tier — always derive from token
         $token = $this->auth->extract_token($request);
         if (!$token) return 'free';
 
