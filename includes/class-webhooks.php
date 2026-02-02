@@ -204,13 +204,13 @@ class Webhooks {
         update_user_meta($user_id, 'sewn_scoreboard_tier', $tier);
         update_user_meta($user_id, 'sewn_scoreboard_created', gmdate('c'));
 
-        // Call scoreboard API to create tenant
+        // Call scoreboard API to create tenant (use internal URL for same-VPS calls)
         $scoreboard_response = wp_remote_post(
-            $this->config->scoreboard_url() . '/v1/tenants',
+            $this->config->scoreboard_internal_url() . '/v1/tenants',
             [
                 'headers' => [
                     'Content-Type'  => 'application/json',
-                    'Authorization' => 'Bearer ' . $this->config->jwt_secret(),
+                    'Authorization' => 'Bearer ' . $this->config->scoreboard_token(),
                 ],
                 'body' => wp_json_encode([
                     'tenant_id'   => $rand_id,

@@ -43,6 +43,20 @@ class Config {
         return rtrim($this->get('scoreboard_url', 'https://wins.wirebot.chat'), '/');
     }
 
+    /**
+     * Internal scoreboard URL (for server-to-server calls on same VPS).
+     */
+    public function scoreboard_internal_url(): string {
+        return rtrim($this->get('scoreboard_internal_url', 'http://127.0.0.1:8100'), '/');
+    }
+
+    /**
+     * Scoreboard API token for server-to-server auth.
+     */
+    public function scoreboard_token(): string {
+        return $this->get('scoreboard_token', '');
+    }
+
     public function wirebot_url(): string {
         return rtrim($this->get('wirebot_url', 'https://helm.wirebot.chat'), '/');
     }
