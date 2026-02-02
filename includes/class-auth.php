@@ -24,20 +24,48 @@ class Auth {
      * Validate a WordPress auth token against the parent site.
      * Returns user data with membership tier or WP_Error.
      *
-     * @param string $token WordPress application password or cookie token
+     * Supports multiple token types:
+     * - Bearer token (JWT-auth plugin or application password)
+     * - Basic auth (base64 encoded username:password from extension fallback)
+     * - Ring Leader JWT (our own tokens, verified locally)
+     *
+     * @param string $token WordPress application password, JWT, or base64 credentials
      * @return array|WP_Error  { user_id, email, tier, membership_ids[], display_name }
      */
     public function validate_parent_token(string $token): array|\WP_Error {
+        // First check if it's one of our own JWTs
+        $jwt_check = $this->verify_jwt($token);
+        if (!is_wp_error($jwt_check)) {
+            return [
+                'user_id'        => $jwt_check['user_id'] ?? 0,
+                'email'          => $jwt_check['email'] ?? '',
+                'display_name'   => $jwt_check['display_name'] ?? '',
+                'tier'           => $jwt_check['tier'] ?? 'free',
+                'tier_level'     => $this->config->tier_level($jwt_check['tier'] ?? 'free'),
+                'membership_ids' => [],
+            ];
+        }
+
         $cache_key = 'sewn_rl_auth_' . md5($token);
         $cached = get_transient($cache_key);
         if ($cached !== false) {
             return $cached;
         }
 
+        // Determine auth header format
+        // If token looks like base64(user:pass), use Basic auth
+        $decoded = base64_decode($token, true);
+        if ($decoded && strpos($decoded, ':') !== false) {
+            $auth_header = 'Basic ' . $token;
+        } else {
+            $auth_header = 'Bearer ' . $token;
+        }
+
         // Validate against parent site's wp/v2/users/me
-        $response = wp_remote_get($this->config->parent_api() . '/wp/v2/users/me', [
+        // Use context=edit to get email, roles, capabilities (requires auth)
+        $response = wp_remote_get($this->config->parent_api() . '/wp/v2/users/me?context=edit', [
             'headers' => [
-                'Authorization' => 'Bearer ' . $token,
+                'Authorization' => $auth_header,
             ],
             'timeout' => 10,
         ]);
@@ -54,16 +82,31 @@ class Auth {
         }
 
         $user_id = (int) $body['id'];
+        $roles   = $body['roles'] ?? [];
+
+        // Per bigpicture.mdx: "WordPress Admin? → Allow All Access"
+        $is_admin = in_array('administrator', $roles, true)
+                 || !empty($body['is_super_admin']);
 
         // Now get membership info from MemberPress API
         $tier = $this->get_member_tier($user_id);
 
+        // Admin gets highest tier regardless of MemberPress membership
+        $tier_slug  = $is_admin ? 'extrawire' : $tier['slug'];
+        $tier_level = $is_admin ? 3 : $this->config->tier_level($tier['slug']);
+
         $user_data = [
             'user_id'        => $user_id,
+            'username'       => $body['username'] ?? $body['slug'] ?? '',
             'email'          => $body['email'] ?? '',
             'display_name'   => $body['name'] ?? '',
-            'tier'           => $tier['slug'],
-            'tier_level'     => $this->config->tier_level($tier['slug']),
+            'description'    => mb_substr($body['description'] ?? '', 0, 500),
+            'url'            => $body['url'] ?? '',
+            'registered'     => $body['registered_date'] ?? '',
+            'roles'          => $roles,
+            'is_admin'       => $is_admin,
+            'tier'           => $tier_slug,
+            'tier_level'     => $tier_level,
             'membership_ids' => $tier['membership_ids'],
             'avatar_url'     => $body['avatar_urls']['96'] ?? '',
         ];
@@ -88,10 +131,13 @@ class Auth {
             'iat'  => $now,
             'exp'  => $now + $ttl,
             'data' => [
-                'user_id'   => $user_data['user_id'],
-                'email'     => $user_data['email'],
-                'tier'      => $user_data['tier'],
-                'tier_level'=> $user_data['tier_level'],
+                'user_id'    => $user_data['user_id'],
+                'username'   => $user_data['username'] ?? '',
+                'email'      => $user_data['email'],
+                'tier'       => $user_data['tier'],
+                'tier_level' => $user_data['tier_level'],
+                'is_admin'   => !empty($user_data['is_admin']),
+                'roles'      => $user_data['roles'] ?? [],
             ],
         ];
 
@@ -140,8 +186,15 @@ class Auth {
     public function extract_token(\WP_REST_Request $request): ?string {
         // Check Authorization header
         $auth = $request->get_header('authorization');
-        if ($auth && preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) {
-            return $m[1];
+        if ($auth) {
+            // Bearer token
+            if (preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) {
+                return $m[1];
+            }
+            // Basic auth (base64 encoded user:pass)
+            if (preg_match('/^Basic\s+(.+)$/i', $auth, $m)) {
+                return $m[1]; // Pass the base64 string; validate_parent_token handles decoding
+            }
         }
 
         // Check custom header
