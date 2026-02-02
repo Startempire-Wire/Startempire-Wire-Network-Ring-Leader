@@ -209,6 +209,13 @@ class Auth {
     }
 
     /**
+     * Public accessor for get_member_tier (used by SSO issue endpoint).
+     */
+    public function get_member_tier_public(int $user_id): array {
+        return $this->get_member_tier($user_id);
+    }
+
+    /**
      * Get member's highest tier from MemberPress.
      */
     private function get_member_tier(int $user_id): array {

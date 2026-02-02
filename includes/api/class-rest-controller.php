@@ -53,6 +53,13 @@ class RestController {
             'permission_callback' => '__return_true',
         ]);
 
+        // SSO: Issue JWT for a trusted server-to-server request (Connect Plugin → Ring Leader)
+        register_rest_route(self::NAMESPACE, '/auth/issue', [
+            'methods'  => 'POST',
+            'callback' => [$this, 'auth_issue'],
+            'permission_callback' => '__return_true',
+        ]);
+
         // === CONTENT (tier-gated) ===
 
         register_rest_route(self::NAMESPACE, '/content', [
@@ -174,6 +181,74 @@ class RestController {
                 'error' => $user_data->get_error_message(),
             ], 401);
         }
+
+        $jwt = $this->auth->issue_jwt($user_data);
+
+        return new \WP_REST_Response([
+            'token'      => $jwt,
+            'user'       => $user_data,
+            'expires_in' => 86400,
+        ]);
+    }
+
+    /**
+     * SSO: Issue JWT for a trusted internal request.
+     * Connect Plugin on parent site calls this with a shared secret + user data.
+     * This avoids the user needing to enter credentials again.
+     */
+    public function auth_issue(\WP_REST_Request $request): \WP_REST_Response {
+        // Verify shared secret
+        $secret = $request->get_header('x-sewn-internal-key');
+        $expected = get_option('sewn_rl_internal_key', '');
+
+        if (empty($expected)) {
+            // Auto-generate on first use
+            $expected = wp_generate_password(48, true, false);
+            update_option('sewn_rl_internal_key', $expected);
+        }
+
+        if (empty($secret) || !hash_equals($expected, $secret)) {
+            return new \WP_REST_Response(['error' => 'Invalid internal key'], 403);
+        }
+
+        $body = $request->get_json_params();
+        $user_id = (int) ($body['user_id'] ?? 0);
+        if (!$user_id) {
+            return new \WP_REST_Response(['error' => 'user_id required'], 400);
+        }
+
+        // Build user data from what Connect Plugin sends (already verified via WP cookie)
+        $roles = $body['roles'] ?? [];
+        $is_admin = in_array('administrator', $roles, true) || !empty($body['is_admin']);
+        $tier_slug = $is_admin ? 'extrawire' : ($body['tier'] ?? 'free');
+        $tier_level = $is_admin ? 3 : $this->config->tier_level($tier_slug);
+
+        // Get membership info from MemberPress
+        $mp_tier = $this->auth->get_member_tier_public($user_id);
+        if ($mp_tier && $mp_tier['slug'] !== 'free') {
+            $tier_slug = $mp_tier['slug'];
+            $tier_level = $this->config->tier_level($tier_slug);
+        }
+        if ($is_admin) {
+            $tier_slug = 'extrawire';
+            $tier_level = 3;
+        }
+
+        $user_data = [
+            'user_id'        => $user_id,
+            'username'       => $body['username'] ?? '',
+            'email'          => $body['email'] ?? '',
+            'display_name'   => $body['display_name'] ?? '',
+            'roles'          => $roles,
+            'is_admin'       => $is_admin,
+            'tier'           => $tier_slug,
+            'tier_level'     => $tier_level,
+            'membership_ids' => $mp_tier['membership_ids'] ?? [],
+            'avatar_url'     => $body['avatar_url'] ?? '',
+            'url'            => $body['url'] ?? '',
+            'registered'     => $body['registered'] ?? '',
+            'description'    => $body['description'] ?? '',
+        ];
 
         $jwt = $this->auth->issue_jwt($user_data);
 
