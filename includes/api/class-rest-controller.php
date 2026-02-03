@@ -374,12 +374,23 @@ class RestController {
             return new \WP_REST_Response(['error' => 'Not authenticated'], 401);
         }
 
+        $user_id = (int) $user['user_id'];
+        $tier_level = (int) ($user['tier_level'] ?? $this->config->tier_level($user['tier'] ?? 'free'));
+
         // Check if user has a scoreboard provisioned
-        $scoreboard_id = get_user_meta($user['user_id'], 'sewn_scoreboard_id', true);
+        $scoreboard_id = get_user_meta($user_id, 'sewn_scoreboard_id', true);
+
+        // Auto-provision for qualifying users (FreeWire+ / tier_level >= 1)
+        if (empty($scoreboard_id) && $tier_level >= 1) {
+            $scoreboard_id = $this->auto_provision_scoreboard($user_id, $user['tier'] ?? 'freewire');
+        }
+
         if (empty($scoreboard_id)) {
             return new \WP_REST_Response([
-                'provisioned' => false,
-                'message'     => 'No scoreboard provisioned. Upgrade to FreeWire+ to get your scoreboard.',
+                'provisioned'     => false,
+                'message'         => 'Upgrade to FreeWire+ to get your scoreboard.',
+                'required_tier'   => 'freewire',
+                'current_tier'    => $user['tier'] ?? 'free',
             ]);
         }
 
@@ -387,7 +398,44 @@ class RestController {
             'provisioned'    => true,
             'scoreboard_url' => $this->config->scoreboard_url() . '/' . $scoreboard_id,
             'scoreboard_id'  => $scoreboard_id,
+            'tier'           => $user['tier'] ?? 'free',
         ]);
+    }
+
+    /**
+     * Auto-provision scoreboard on first access (lazy provisioning).
+     * Generates randID, stores in user meta, calls scoreboard API.
+     */
+    private function auto_provision_scoreboard(int $user_id, string $tier): string {
+        // Generate URL-safe random ID (12 chars)
+        $rand_id = substr(str_replace(['+', '/', '='], '', base64_encode(random_bytes(9))), 0, 12);
+
+        // Store in user meta
+        update_user_meta($user_id, 'sewn_scoreboard_id', $rand_id);
+        update_user_meta($user_id, 'sewn_scoreboard_active', true);
+        update_user_meta($user_id, 'sewn_scoreboard_tier', $tier);
+        update_user_meta($user_id, 'sewn_scoreboard_created', gmdate('c'));
+
+        // Call scoreboard API to create tenant (internal URL for same-VPS)
+        wp_remote_post(
+            $this->config->scoreboard_internal_url() . '/v1/tenants',
+            [
+                'headers' => [
+                    'Content-Type'  => 'application/json',
+                    'Authorization' => 'Bearer ' . $this->config->scoreboard_token(),
+                ],
+                'body' => wp_json_encode([
+                    'tenant_id'  => $rand_id,
+                    'user_id'    => $user_id,
+                    'tier'       => $tier,
+                    'created_at' => gmdate('c'),
+                ]),
+                'timeout' => 10,
+            ]
+        );
+
+        error_log("[Ring Leader] Auto-provisioned scoreboard: $rand_id for user $user_id (tier: $tier)");
+        return $rand_id;
     }
 
     /**
