@@ -194,13 +194,7 @@ class Webhooks {
         // Generate unique randID (URL-safe, 12 chars)
         $rand_id = $this->generate_rand_id();
 
-        // Store in user meta on parent site (via API) and locally
-        update_user_meta($user_id, 'sewn_scoreboard_id', $rand_id);
-        update_user_meta($user_id, 'sewn_scoreboard_active', true);
-        update_user_meta($user_id, 'sewn_scoreboard_tier', $tier);
-        update_user_meta($user_id, 'sewn_scoreboard_created', gmdate('c'));
-
-        // Call scoreboard API to create tenant (use internal URL for same-VPS calls)
+        // Phase 1: create tenant in scoreboard
         $scoreboard_response = wp_remote_post(
             $this->config->scoreboard_internal_url() . '/v1/tenants',
             [
@@ -220,6 +214,14 @@ class Webhooks {
 
         $scoreboard_ok = !is_wp_error($scoreboard_response)
             && wp_remote_retrieve_response_code($scoreboard_response) < 300;
+
+        if ($scoreboard_ok) {
+            // Phase 2: persist local metadata only on API success
+            update_user_meta($user_id, 'sewn_scoreboard_id', $rand_id);
+            update_user_meta($user_id, 'sewn_scoreboard_active', true);
+            update_user_meta($user_id, 'sewn_scoreboard_tier', $tier);
+            update_user_meta($user_id, 'sewn_scoreboard_created', gmdate('c'));
+        }
 
         $this->log("Scoreboard provisioned: $rand_id for user $user_id (tier: $tier, api_ok: " . ($scoreboard_ok ? 'yes' : 'no') . ")");
 

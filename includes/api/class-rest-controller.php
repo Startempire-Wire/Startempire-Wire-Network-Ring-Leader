@@ -404,20 +404,14 @@ class RestController {
 
     /**
      * Auto-provision scoreboard on first access (lazy provisioning).
-     * Generates randID, stores in user meta, calls scoreboard API.
+     * Two-phase commit: create tenant first, persist user meta only on success.
      */
     private function auto_provision_scoreboard(int $user_id, string $tier): string {
         // Generate URL-safe random ID (12 chars)
         $rand_id = substr(str_replace(['+', '/', '='], '', base64_encode(random_bytes(9))), 0, 12);
 
-        // Store in user meta
-        update_user_meta($user_id, 'sewn_scoreboard_id', $rand_id);
-        update_user_meta($user_id, 'sewn_scoreboard_active', true);
-        update_user_meta($user_id, 'sewn_scoreboard_tier', $tier);
-        update_user_meta($user_id, 'sewn_scoreboard_created', gmdate('c'));
-
-        // Call scoreboard API to create tenant (internal URL for same-VPS)
-        wp_remote_post(
+        // Phase 1: create tenant in scoreboard
+        $resp = wp_remote_post(
             $this->config->scoreboard_internal_url() . '/v1/tenants',
             [
                 'headers' => [
@@ -433,6 +427,18 @@ class RestController {
                 'timeout' => 10,
             ]
         );
+
+        $ok = !is_wp_error($resp) && wp_remote_retrieve_response_code($resp) < 300;
+        if (!$ok) {
+            error_log("[Ring Leader] Auto-provision failed: user $user_id (tier: $tier)");
+            return '';
+        }
+
+        // Phase 2: persist local metadata only after successful tenant creation
+        update_user_meta($user_id, 'sewn_scoreboard_id', $rand_id);
+        update_user_meta($user_id, 'sewn_scoreboard_active', true);
+        update_user_meta($user_id, 'sewn_scoreboard_tier', $tier);
+        update_user_meta($user_id, 'sewn_scoreboard_created', gmdate('c'));
 
         error_log("[Ring Leader] Auto-provisioned scoreboard: $rand_id for user $user_id (tier: $tier)");
         return $rand_id;
