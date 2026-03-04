@@ -36,13 +36,20 @@ class Auth {
         // First check if it's one of our own JWTs
         $jwt_check = $this->verify_jwt($token);
         if (!is_wp_error($jwt_check)) {
+            $user_id = (int) ($jwt_check['user_id'] ?? 0);
+            $scoreboard_id = $this->sanitize_scoreboard_id($jwt_check['scoreboard_id'] ?? '');
+            if ($scoreboard_id === '' && $user_id > 0) {
+                $scoreboard_id = $this->sanitize_scoreboard_id((string) get_user_meta($user_id, 'sewn_scoreboard_id', true));
+            }
+
             return [
-                'user_id'        => $jwt_check['user_id'] ?? 0,
+                'user_id'        => $user_id,
                 'email'          => $jwt_check['email'] ?? '',
                 'display_name'   => $jwt_check['display_name'] ?? '',
                 'tier'           => $jwt_check['tier'] ?? 'free',
                 'tier_level'     => $this->config->tier_level($jwt_check['tier'] ?? 'free'),
                 'membership_ids' => [],
+                'scoreboard_id'  => $scoreboard_id,
             ];
         }
 
@@ -108,6 +115,7 @@ class Auth {
             'tier'           => $tier_slug,
             'tier_level'     => $tier_level,
             'membership_ids' => $tier['membership_ids'],
+            'scoreboard_id'  => $this->sanitize_scoreboard_id((string) get_user_meta($user_id, 'sewn_scoreboard_id', true)),
             'avatar_url'     => $body['avatar_urls']['96'] ?? '',
         ];
 
@@ -126,18 +134,25 @@ class Auth {
      */
     public function issue_jwt(array $user_data, int $ttl = 86400): string {
         $now = time();
+        $user_id = (int) ($user_data['user_id'] ?? 0);
+        $scoreboard_id = $this->sanitize_scoreboard_id($user_data['scoreboard_id'] ?? '');
+        if ($scoreboard_id === '' && $user_id > 0) {
+            $scoreboard_id = $this->sanitize_scoreboard_id((string) get_user_meta($user_id, 'sewn_scoreboard_id', true));
+        }
+
         $payload = [
             'iss'  => home_url(),
             'iat'  => $now,
             'exp'  => $now + $ttl,
             'data' => [
-                'user_id'    => $user_data['user_id'],
-                'username'   => $user_data['username'] ?? '',
-                'email'      => $user_data['email'],
-                'tier'       => $user_data['tier'],
-                'tier_level' => $user_data['tier_level'],
-                'is_admin'   => !empty($user_data['is_admin']),
-                'roles'      => $user_data['roles'] ?? [],
+                'user_id'      => $user_id,
+                'username'     => $user_data['username'] ?? '',
+                'email'        => $user_data['email'] ?? '',
+                'tier'         => $user_data['tier'] ?? 'free',
+                'tier_level'   => (int) ($user_data['tier_level'] ?? 0),
+                'is_admin'     => !empty($user_data['is_admin']),
+                'roles'        => $user_data['roles'] ?? [],
+                'scoreboard_id'=> $scoreboard_id,
             ],
         ];
 
@@ -261,6 +276,17 @@ class Auth {
         }
 
         return ['slug' => $best_tier, 'membership_ids' => $ids];
+    }
+
+    private function sanitize_scoreboard_id(string $value): string {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        if (!preg_match('/^[a-zA-Z0-9]{6,20}$/', $value)) {
+            return '';
+        }
+        return $value;
     }
 
     // --- JWT helpers (no external dependency) ---
