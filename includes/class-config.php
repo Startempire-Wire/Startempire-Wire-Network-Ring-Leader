@@ -66,32 +66,52 @@ class Config {
     }
 
     /**
-     * Membership tier map: MemberPress membership ID → tier slug
+     * Membership tier map: MemberPress membership ID → tier slug.
+     * Keep in sync with wirebot-provisioning/inc/class-tier-map.php PRODUCT_MAP.
      */
     public function tier_map(): array {
         return [
-            // From MemberPress API: id → tier
-            17268 => 'freewire',    // FreeWire™ (lifetime, $0)
-            1494  => 'wire',        // Wire™ Monthly ($35)
-            41156 => 'wire',        // Wire™ Quarterly ($101.85)
-            41158 => 'wire',        // Wire™ Yearly ($399)
-            1498  => 'extrawire',   // ExtraWire™ Monthly ($55)
-            41155 => 'extrawire',   // ExtraWire™ Quarterly ($160.05)
-            41157 => 'extrawire',   // ExtraWire™ Yearly ($627)
-            32073 => 'advertiser',  // Advertiser (lifetime, $0)
+            // FreeWire
+            17268 => 'freewire',        // FreeWire™ (lifetime, $0)
+
+            // Wire
+            1494  => 'wire',            // Wire™ Monthly ($35)
+            41156 => 'wire',            // Wire™ Quarterly ($101.85)
+            41158 => 'wire',            // Wire™ Yearly ($399)
+
+            // ExtraWire
+            1498  => 'extrawire',       // ExtraWire™ Monthly ($55)
+            41155 => 'extrawire',       // ExtraWire™ Quarterly ($160.05)
+            41157 => 'extrawire',       // ExtraWire™ Yearly ($627)
+            48655 => 'extrawire',       // ExtraWire™ Founding Signal
+            48656 => 'extrawire',       // ExtraWire™ Founding Builder
+            48657 => 'extrawire',       // ExtraWire™ Founding Operator
+            48658 => 'extrawire',       // ExtraWire™ Founding Network
+            48659 => 'extrawire',       // ExtraWire™ Founding Wire
+
+            // Wirebot Direct (same access level as Wire)
+            48595 => 'wirebot_direct',  // Wirebot Direct Quarterly
+            48596 => 'wirebot_direct',  // Wirebot Direct Yearly
+
+            // Other
+            32073 => 'advertiser',      // Advertiser (lifetime, $0)
         ];
     }
 
     /**
-     * Map tier slug to numeric level for comparison
+     * Map tier slug to numeric level for comparison.
+     * Keep in sync with wirebot-provisioning/inc/class-tier-map.php TIER_LEVELS.
      */
     public function tier_level(string $tier): int {
         $levels = [
-            'free'       => 0,
-            'freewire'   => 1,
-            'wire'       => 2,
-            'extrawire'  => 3,
-            'advertiser' => 1, // Same access as FreeWire
+            'free'              => 0,
+            'freewire'          => 1,
+            'advertiser'        => 1,
+            'wire'              => 2,
+            'wirebot_direct'    => 2,
+            'extrawire'         => 3,
+            'sovereign'         => 4,
+            'sovereign_builder' => 5,
         ];
         return $levels[$tier] ?? 0;
     }
