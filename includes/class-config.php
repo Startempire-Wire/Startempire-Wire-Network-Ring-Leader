@@ -66,6 +66,14 @@ class Config {
     }
 
     /**
+     * Shared secret for inbound webhook signatures.
+     * Separate from JWT secret to reduce blast radius.
+     */
+    public function webhook_secret(): string {
+        return (string) $this->get('webhook_secret', '');
+    }
+
+    /**
      * Membership tier map: MemberPress membership ID → tier slug.
      * Keep in sync with wirebot-provisioning/inc/class-tier-map.php PRODUCT_MAP.
      */

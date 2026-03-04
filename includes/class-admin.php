@@ -77,6 +77,13 @@ class Admin {
             echo '<label><input type="checkbox" name="sewn_rl_settings[enable_webhooks]" value="1" ' . checked($val, true, false) . ' /> Accept incoming webhooks from MemberPress and ecosystem</label>';
         }, 'sewn-ring-leader', 'sewn_rl_main');
 
+        add_settings_field('webhook_secret', 'Webhook Secret', function () {
+            $settings = get_option('sewn_rl_settings', []);
+            $val = $settings['webhook_secret'] ?? '';
+            echo '<input type="password" name="sewn_rl_settings[webhook_secret]" value="' . esc_attr($val) . '" class="regular-text" autocomplete="new-password" />';
+            echo '<p class="description">Shared secret for X-SEWN-Webhook-Secret. Keep separate from JWT secret.</p>';
+        }, 'sewn-ring-leader', 'sewn_rl_main');
+
         add_settings_field('jwt_secret_display', 'JWT Secret', function () {
             $secret = get_option('sewn_rl_jwt_secret', '');
             $masked = $secret ? substr($secret, 0, 8) . '...' . substr($secret, -4) : '(not set)';
@@ -92,6 +99,7 @@ class Admin {
             'scoreboard_url'  => esc_url_raw($input['scoreboard_url'] ?? ''),
             'wirebot_url'     => esc_url_raw($input['wirebot_url'] ?? ''),
             'enable_webhooks' => !empty($input['enable_webhooks']),
+            'webhook_secret'  => sanitize_text_field($input['webhook_secret'] ?? ''),
         ];
     }
 

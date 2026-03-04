@@ -98,21 +98,17 @@ class Webhooks {
      * Verify webhook signature (shared secret).
      */
     public function verify_webhook_signature(\WP_REST_Request $request): bool {
-        // Check for webhook secret in header
+        // Check for dedicated webhook secret in header
         $sig = $request->get_header('x-sewn-webhook-secret');
-        if ($sig && hash_equals($this->config->jwt_secret(), $sig)) {
+        $webhook_secret = $this->config->webhook_secret();
+        if ($sig && $webhook_secret !== '' && hash_equals($webhook_secret, $sig)) {
             return true;
         }
 
-        // Also accept MemberPress-style webhook (IP allowlist or API key)
+        // Also accept MemberPress-style webhook auth via API key
         $api_key = $request->get_header('memberpress-api-key');
-        if ($api_key && hash_equals($this->config->parent_api_key(), $api_key)) {
-            return true;
-        }
-
-        // For development: allow from localhost
-        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-        if (in_array($ip, ['127.0.0.1', '::1'])) {
+        $parent_api_key = $this->config->parent_api_key();
+        if ($api_key && $parent_api_key !== '' && hash_equals($parent_api_key, $api_key)) {
             return true;
         }
 
