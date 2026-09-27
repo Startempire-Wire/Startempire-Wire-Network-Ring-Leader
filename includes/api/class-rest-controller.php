@@ -60,6 +60,13 @@ class RestController {
             'permission_callback' => '__return_true',
         ]);
 
+        // Server-authenticated, uncached MemberPress observation for Core admission.
+        register_rest_route(self::NAMESPACE, '/auth/membership/current', [
+            'methods'  => 'POST',
+            'callback' => [$this, 'auth_current_membership'],
+            'permission_callback' => '__return_true',
+        ]);
+
         // === CONTENT (tier-gated) ===
 
         register_rest_route(self::NAMESPACE, '/content', [
@@ -278,6 +285,37 @@ class RestController {
             'user'       => $user_data,
             'expires_in' => 86400,
         ]);
+    }
+
+    /** Core-only membership observation. No JWT tier, parent-token cache or money grant. */
+    public function auth_current_membership(\WP_REST_Request $request): \WP_REST_Response {
+        $expected = $this->config->scoreboard_token();
+        $header = trim((string) $request->get_header('authorization'));
+        if ($expected === '' || !preg_match('/^Bearer ([^[:space:]]+)$/i', $header, $match)
+            || !hash_equals($expected, $match[1])) {
+            return new \WP_REST_Response(['error' => 'Forbidden'], 403);
+        }
+        $user_id = filter_var($request->get_param('user_id'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($user_id === false) {
+            return new \WP_REST_Response(['error' => 'Positive user_id required'], 400);
+        }
+        $tier = $this->auth->get_member_tier_current($user_id);
+        if (is_wp_error($tier)) {
+            return new \WP_REST_Response(['status' => 'unknown', 'error' => 'Membership provider unavailable'], 503);
+        }
+        $response = new \WP_REST_Response([
+            'schema' => 'sewn.membership_current.v1',
+            'source' => 'memberpress',
+            'id' => $user_id,
+            'active_memberships' => array_map(
+                static fn (int $id): array => ['id' => $id],
+                $tier['membership_ids']
+            ),
+            'tier' => $tier['slug'],
+            'observed_at' => $tier['observed_at'],
+        ], 200);
+        $response->header('Cache-Control', 'private, no-store');
+        return $response;
     }
 
     // ==================== CONTENT ====================

@@ -48,7 +48,8 @@ class Auth {
                 'display_name'   => $jwt_check['display_name'] ?? '',
                 'tier'           => $jwt_check['tier'] ?? 'free',
                 'tier_level'     => $this->config->tier_level($jwt_check['tier'] ?? 'free'),
-                'membership_ids' => [],
+                // Signed issuance snapshot only; current membership still needs MemberPress.
+                'membership_ids' => $this->normalized_membership_ids($jwt_check['membership_ids'] ?? []),
                 'scoreboard_id'  => $scoreboard_id,
             ];
         }
@@ -152,6 +153,7 @@ class Auth {
                 'tier_level'   => (int) ($user_data['tier_level'] ?? 0),
                 'is_admin'     => !empty($user_data['is_admin']),
                 'roles'        => $user_data['roles'] ?? [],
+                'membership_ids' => $this->normalized_membership_ids($user_data['membership_ids'] ?? []),
                 'scoreboard_id'=> $scoreboard_id,
             ],
         ];
@@ -258,12 +260,71 @@ class Auth {
             return ['slug' => 'free', 'membership_ids' => []];
         }
 
-        // Find highest tier
+        return $this->tier_for_memberships($active_memberships);
+    }
+
+    /**
+     * An uncached provider observation. Failure is unknown, never verified free.
+     * JWT tier and the parent-token transient must not enter this path.
+     */
+    public function get_member_tier_current(int $user_id): array|\WP_Error {
+        $api_key = $this->config->parent_api_key();
+        if ($user_id <= 0 || $api_key === '') {
+            return new \WP_Error('membership_unknown', 'Membership provider unavailable', ['status' => 503]);
+        }
+        $response = wp_remote_get(
+            $this->config->parent_api() . '/mp/v1/members/' . $user_id,
+            [
+                'headers' => ['MEMBERPRESS-API-KEY' => $api_key, 'Cache-Control' => 'no-cache, no-store'],
+                'timeout' => 10,
+                'redirection' => 0,
+                'sslverify' => true,
+                'limit_response_size' => 131073,
+            ]
+        );
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            return new \WP_Error('membership_unknown', 'Membership provider unavailable', ['status' => 503]);
+        }
+        $age = wp_remote_retrieve_header($response, 'age');
+        if ($age !== '' && $age !== null && (string) $age !== '0') {
+            return new \WP_Error('membership_unknown', 'Membership provider response was cached', ['status' => 503]);
+        }
+        $raw = wp_remote_retrieve_body($response);
+        if (!is_string($raw) || strlen($raw) > 131072) {
+            return new \WP_Error('membership_unknown', 'Membership provider response invalid', ['status' => 503]);
+        }
+        $body = json_decode($raw, true);
+        $member_id = is_array($body) ? ($body['id'] ?? null) : null;
+        if (filter_var($member_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+            || (int) $member_id !== $user_id
+            || !isset($body['active_memberships'])
+            || !is_array($body['active_memberships'])
+            || !array_is_list($body['active_memberships'])) {
+            return new \WP_Error('membership_unknown', 'Membership provider identity or products invalid', ['status' => 503]);
+        }
+        $active = [];
+        $seen = [];
+        foreach ($body['active_memberships'] as $membership) {
+            $id = is_array($membership) ? ($membership['id'] ?? null) : null;
+            if (filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+                return new \WP_Error('membership_unknown', 'Membership provider product invalid', ['status' => 503]);
+            }
+            $id = (int) $id;
+            if (!isset($seen[$id])) {
+                $active[] = ['id' => $id];
+                $seen[$id] = true;
+            }
+        }
+        $tier = $this->tier_for_memberships($active);
+        $tier['observed_at'] = gmdate('Y-m-d\TH:i:s\Z');
+        return $tier;
+    }
+
+    private function tier_for_memberships(array $active_memberships): array {
         $tier_map = $this->config->tier_map();
         $best_tier = 'free';
         $best_level = 0;
         $ids = [];
-
         foreach ($active_memberships as $membership) {
             $mid = (int) ($membership['id'] ?? 0);
             $ids[] = $mid;
@@ -274,8 +335,24 @@ class Auth {
                 $best_tier = $slug;
             }
         }
-
         return ['slug' => $best_tier, 'membership_ids' => $ids];
+    }
+
+    private function normalized_membership_ids(mixed $value): array {
+        if (!is_array($value)) {
+            return [];
+        }
+        $ids = [];
+        foreach ($value as $candidate) {
+            if (!is_int($candidate) && !is_string($candidate)) {
+                continue;
+            }
+            $id = filter_var($candidate, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($id !== false && !in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+        return $ids;
     }
 
     private function sanitize_scoreboard_id(string $value): string {
