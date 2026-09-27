@@ -57,6 +57,11 @@ class Config {
         return $this->get('scoreboard_token', '');
     }
 
+    /** Separate, read-only W.I.N.S. membership broker credential; no default. */
+    public function membership_service_token(): string {
+        return (string) get_option('sewn_rl_membership_service_token', '');
+    }
+
     public function wirebot_url(): string {
         return rtrim($this->get('wirebot_url', 'https://helm.wirebot.chat'), '/');
     }

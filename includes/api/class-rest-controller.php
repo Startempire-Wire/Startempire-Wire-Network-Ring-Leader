@@ -289,7 +289,7 @@ class RestController {
 
     /** Core-only membership observation. No JWT tier, parent-token cache or money grant. */
     public function auth_current_membership(\WP_REST_Request $request): \WP_REST_Response {
-        $expected = $this->config->scoreboard_token();
+        $expected = $this->config->membership_service_token();
         $header = trim((string) $request->get_header('authorization'));
         if ($expected === '' || !preg_match('/^Bearer ([^[:space:]]+)$/i', $header, $match)
             || !hash_equals($expected, $match[1])) {

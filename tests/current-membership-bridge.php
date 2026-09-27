@@ -6,7 +6,7 @@ namespace {
     $GLOBALS['memberpress_response'] = ['code' => 200, 'body' => '{"id":42,"active_memberships":[]}'];
     $GLOBALS['provider_calls'] = 0;
     $GLOBALS['routes'] = [];
-    $GLOBALS['options'] = ['sewn_rl_settings' => ['scoreboard_token' => 'synthetic-scoreboard-service-key'], 'sewn_rl_parent_api_key' => 'synthetic-provider-key', 'sewn_rl_jwt_secret' => 'synthetic-signing-secret'];
+    $GLOBALS['options'] = ['sewn_rl_settings' => ['scoreboard_token' => 'unused-master-token'], 'sewn_rl_membership_service_token' => 'synthetic-scoreboard-service-key', 'sewn_rl_parent_api_key' => 'synthetic-provider-key', 'sewn_rl_jwt_secret' => 'synthetic-signing-secret'];
     class WP_Error {
         public function __construct(public string $code, public string $message, public array $data = []) {}
     }
@@ -50,7 +50,7 @@ namespace {
     require_true(is_array($route) && $route['methods'] === 'POST', 'current membership route not registered as POST');
     $call = fn (string $key, mixed $id = 42) => $controller->auth_current_membership(new \WP_REST_Request($key, $id));
     $key = 'Bearer synthetic-scoreboard-service-key';
-    foreach (['', 'Bearer invalid', 'Bearer synthetic-provider-key'] as $unauthorized) {
+    foreach (['', 'Bearer invalid', 'Bearer unused-master-token', 'Bearer synthetic-provider-key'] as $unauthorized) {
         require_true($call($unauthorized)->get_status() === 403, 'unauthorized membership read accepted');
     }
     require_true($GLOBALS['provider_calls'] === 0, 'unauthorized request reached MemberPress');
