@@ -14,6 +14,10 @@
 -- Accepts New Member Registrations
 - Creates API Endpoints For Data To Connect to Startempire Network Connect Plugin
 
+## Proposed book Challenge / FreeWire integration (2026-11-06)
+
+See [Make More Assets cross-site FreeWire identity and event-member contract](docs/MAKE-MORE-ASSETS-FREEWIRE-IDENTITY-BRIDGE-2026-11-06.md). This is **documentation only**: book Challenge registrants get event-bound OTP access via the book site and may separately opt into a free Startempire Wire parent WordPress/MemberPress account. This plugin must preserve one canonical parent member, real provider tier verification, explicit profile visibility and no anonymous profile creation. No Google Live/OTP/member enrollment code has been installed by this handoff. The site-wide implementation is tracked in the book repository.
+
 ## Current membership proof (source contract)
 
 `POST /wp-json/sewn/v1/auth/membership/current` accepts a positive `user_id` from the authenticated Scoreboard service only (`Authorization: Bearer` with Ring Leader's dedicated `sewn_rl_membership_service_token`). An absent or wrong service token returns 403 without contacting MemberPress. Ring Leader re-reads `/mp/v1/members/{id}` without its parent-token transient; a valid 200 response with an exact owner and an explicit empty `active_memberships` list is verified free, while provider failure, mismatched identity, malformed data, cached responses and redirects are unknown (503). Successful responses carry `sewn.membership_current.v1`, current product IDs, the provider-derived tier, an observation timestamp and `Cache-Control: private, no-store`. The score, JWT tier and signed `membership_ids` are never current provider proof. An absent or mismatched dedicated broker token fails closed; no endpoint is active until the plugin is installed and configured on the owning Network site.
